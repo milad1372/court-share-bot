@@ -1,2 +1,5 @@
 python-telegram-bot[ext]>=21
 openpyxl>=3
+# Only needed when deploying in webhook mode (e.g. PythonAnywhere).
+# Safe to keep on locally-polling installs too.
+flask>=3

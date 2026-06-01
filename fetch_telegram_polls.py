@@ -907,6 +907,56 @@ class Bot:
 # Main
 # ────────────────────────────────────────────────────────────────────────────
 
+def build_application(*, token: str, output: str = "polls.json",
+                      collector: str = "Milad Momeni",
+                      rate: float = RATE_PER_COURT_PER_HOUR,
+                      max_yes_per_court: int = 6) -> Application:
+    """Build a fully-wired python-telegram-bot Application.
+
+    Used by both polling mode (`main()` below) and webhook mode (`wsgi.py`).
+    Side effect: overrides `badminton_shares.RATE_PER_COURT_PER_HOUR` so the
+    share calculator agrees with the bot's `--rate` flag.
+    """
+    if not token:
+        raise RuntimeError("Missing bot token (set TELEGRAM_BOT_TOKEN).")
+
+    import badminton_shares
+    badminton_shares.RATE_PER_COURT_PER_HOUR = rate
+
+    store = PollStore(Path(output))
+    out = Path(output)
+    user_index = UserIndex(out.with_name(".users.json"))
+    payments = PaymentLog(out.with_name("payments.json"))
+    bot = Bot(store, user_index=user_index, payments=payments,
+              collector=collector, rate=rate,
+              max_yes_per_court=max_yes_per_court)
+
+    app = Application.builder().token(token).build()
+
+    app.add_handler(CommandHandler("help",     bot.cmd_help))
+    app.add_handler(CommandHandler("start",    bot.cmd_help))
+    app.add_handler(CommandHandler("rate",     bot.cmd_rate))
+    app.add_handler(CommandHandler("poll",     bot.cmd_poll))
+    app.add_handler(CommandHandler("balance",  bot.cmd_balance))
+    app.add_handler(CommandHandler("summary",  bot.cmd_summary))
+    app.add_handler(CommandHandler("accounts", bot.cmd_accounts))
+    app.add_handler(CommandHandler("paid",     bot.cmd_paid))
+    app.add_handler(CommandHandler("credit",   bot.cmd_credit))
+    app.add_handler(CommandHandler("reset",    bot.cmd_reset))
+    app.add_handler(CommandHandler("polls",    bot.cmd_polls))
+    app.add_handler(CommandHandler("report",   bot.cmd_report))
+
+    app.add_handler(MessageHandler(filters.POLL, bot.on_poll_message))
+    app.add_handler(PollAnswerHandler(bot.on_poll_answer))
+    app.add_handler(PollHandler(bot.on_poll_state))
+
+    log.info(
+        "Application built. Collector=%s  rate=$%.2f/court/hour  cap=%d Yes/court",
+        collector, rate, max_yes_per_court,
+    )
+    return app
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", "-o", default="polls.json",
@@ -929,39 +979,12 @@ def main():
         sys.stderr.write("Missing bot token. Set $TELEGRAM_BOT_TOKEN or pass --token.\n")
         sys.exit(2)
 
-    # Propagate rate override to the share calc module
-    import badminton_shares
-    badminton_shares.RATE_PER_COURT_PER_HOUR = args.rate
-
-    store = PollStore(Path(args.output))
-    out = Path(args.output)
-    user_index = UserIndex(out.with_name(".users.json"))
-    payments = PaymentLog(out.with_name("payments.json"))
-    bot = Bot(store, user_index=user_index, payments=payments,
-              collector=args.collector, rate=args.rate,
-              max_yes_per_court=args.max_yes_per_court)
-
-    app = Application.builder().token(args.token).build()
-
-    app.add_handler(CommandHandler("help",     bot.cmd_help))
-    app.add_handler(CommandHandler("start",    bot.cmd_help))
-    app.add_handler(CommandHandler("rate",     bot.cmd_rate))
-    app.add_handler(CommandHandler("poll",     bot.cmd_poll))
-    app.add_handler(CommandHandler("balance",  bot.cmd_balance))
-    app.add_handler(CommandHandler("summary",  bot.cmd_summary))
-    app.add_handler(CommandHandler("accounts", bot.cmd_accounts))
-    app.add_handler(CommandHandler("paid",     bot.cmd_paid))
-    app.add_handler(CommandHandler("credit",   bot.cmd_credit))
-    app.add_handler(CommandHandler("reset",    bot.cmd_reset))
-    app.add_handler(CommandHandler("polls",    bot.cmd_polls))
-    app.add_handler(CommandHandler("report",   bot.cmd_report))
-
-    app.add_handler(MessageHandler(filters.POLL, bot.on_poll_message))
-    app.add_handler(PollAnswerHandler(bot.on_poll_answer))
-    app.add_handler(PollHandler(bot.on_poll_state))
-
-    log.info("Bot online. Collector=%s  rate=$%.2f/court/hour  cap=%d Yes/court",
-             args.collector, args.rate, args.max_yes_per_court)
+    app = build_application(
+        token=args.token, output=args.output,
+        collector=args.collector, rate=args.rate,
+        max_yes_per_court=args.max_yes_per_court,
+    )
+    log.info("Bot online (polling).")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
